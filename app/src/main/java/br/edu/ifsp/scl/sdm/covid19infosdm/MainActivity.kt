@@ -6,8 +6,14 @@ import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import androidx.lifecycle.Observer
+import br.edu.ifsp.scl.sdm.covid19infosdm.model.dataclass.CaseList
 import br.edu.ifsp.scl.sdm.covid19infosdm.viewmodel.Covid19ViewModel
+import com.jjoe64.graphview.helper.DateAsXAxisLabelFormatter
+import com.jjoe64.graphview.series.DataPoint
+import com.jjoe64.graphview.series.LineGraphSeries
 import kotlinx.android.synthetic.main.activity_main.*
+import java.text.SimpleDateFormat
+import java.util.*
 
 class MainActivity : AppCompatActivity() {
     private lateinit var viewModel: Covid19ViewModel
@@ -39,7 +45,12 @@ class MainActivity : AppCompatActivity() {
         statusAdapterInit()
     }
 
-    fun onRetrieveClick(view: View) {  }
+    fun onRetrieveClick(view: View) {
+        when (infoSp.selectedItem.toString()) {
+            Information.DAY_ONE.type -> { fetchDayOne() }
+            Information.BY_COUNTRY.type -> { fetchByCountry() }
+        }
+    }
 
     private fun countryAdapterInit() {
         /* Preenchido por Web Service */
@@ -83,5 +94,84 @@ class MainActivity : AppCompatActivity() {
         Status.values().forEach { statusList.add(it.type) }
 
         statusSp.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, statusList)
+    }
+
+    private fun fetchDayOne() {
+        modoGrafico(ligado = false)
+        viewModel.fetchDayOne(countrySp.selectedItem.toString(), statusSp.selectedItem.toString()).observe(
+            this,
+            Observer { casesList ->
+                resultTv.text = casesListToString(casesList)
+            }
+        )
+    }
+
+    private fun fetchByCountry() {
+        viewModel.fetchByCountry(countrySp.selectedItem.toString(), statusSp.selectedItem.toString()).observe(
+            this,
+            Observer { casesList ->
+                if (viewModeTextRb.isChecked) {
+                    /* Modo texto */
+                    modoGrafico(ligado = false)
+                    resultTv.text = casesListToString(casesList)
+                }
+                else {
+                    /* Modo gráfico */
+                    modoGrafico(ligado = true)
+                    resultGv.removeAllSeries()
+                    resultGv.gridLabelRenderer.resetStyles()
+
+                    /* Preparando pontos */
+                    val pointsArrayList = arrayListOf<DataPoint>()
+                    casesList.forEach {
+                        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(it.date.substring(0,10))
+                        val point = DataPoint(date, it.cases.toDouble())
+                        pointsArrayList.add(point)
+                    }
+                    val pointsSeries = LineGraphSeries(pointsArrayList.toTypedArray())
+                    resultGv.addSeries(pointsSeries)
+
+                    /* Formatando gráfico */
+                    resultGv.gridLabelRenderer.setHumanRounding(false)
+                    resultGv.gridLabelRenderer.labelFormatter = DateAsXAxisLabelFormatter(this)
+
+                    resultGv.gridLabelRenderer.numHorizontalLabels = 4
+                    val primeiraData = Date(pointsArrayList.first().x.toLong())
+                    val ultimaData = Date(pointsArrayList.last().x.toLong())
+                    resultGv.viewport.setMinX(primeiraData.time.toDouble())
+                    resultGv.viewport.setMaxX(ultimaData.time.toDouble())
+                    resultGv.viewport.isXAxisBoundsManual = true
+
+                    resultGv.gridLabelRenderer.numVerticalLabels = 4
+                    resultGv.viewport.setMinY(pointsArrayList.first().y)
+                    resultGv.viewport.setMaxY(pointsArrayList.last().y)
+                    resultGv.viewport.isYAxisBoundsManual = true
+                }
+            }
+        )
+    }
+
+    private fun modoGrafico(ligado: Boolean) {
+        if (ligado) {
+            resultTv.visibility = View.GONE
+            resultGv.visibility = View.VISIBLE
+        }
+        else {
+            resultTv.visibility = View.VISIBLE
+            resultGv.visibility = View.GONE
+        }
+    }
+
+    private fun casesListToString(caseList: CaseList): String {
+        val resultSb = StringBuffer()
+        caseList.forEach {
+            resultSb.append("Nome: ${it.country}\n")
+            if (it.province.isNotEmpty()) {
+                resultSb.append("Estado/região: ${it.province}\n")
+            }
+            resultSb.append("Data: ${it.date.substring(0,10)}\n")
+            resultSb.append("Casos: ${it.cases}\n\n")
+        }
+        return resultSb.toString()
     }
 }
