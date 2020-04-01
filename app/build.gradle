@@ -37,4 +37,8 @@ dependencies {
 
     /* GraphView */
     implementation 'com.jjoe64:graphview:4.2.2'
+    /* Volley */
+    implementation 'com.android.volley:volley:1.1.1'
+    /* Gson */
+    implementation 'com.google.code.gson:gson:2.8.6'
 }
