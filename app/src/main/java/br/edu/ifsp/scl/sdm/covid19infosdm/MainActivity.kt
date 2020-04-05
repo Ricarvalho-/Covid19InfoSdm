@@ -6,7 +6,7 @@ import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import androidx.lifecycle.Observer
-import br.edu.ifsp.scl.sdm.covid19infosdm.model.dataclass.CaseList
+import br.edu.ifsp.scl.sdm.covid19infosdm.model.dataclass.*
 import br.edu.ifsp.scl.sdm.covid19infosdm.viewmodel.Covid19ViewModel
 import com.jjoe64.graphview.helper.DateAsXAxisLabelFormatter
 import com.jjoe64.graphview.series.DataPoint
@@ -18,6 +18,7 @@ import java.util.*
 class MainActivity : AppCompatActivity() {
     private lateinit var viewModel: Covid19ViewModel
     private lateinit var countryAdapter: ArrayAdapter<String>
+    private lateinit var countryNameSlugMap: MutableMap<String, String>
 
     /* Classe para os serviços que serão acessados */
     private enum class Information(val type: String){
@@ -55,12 +56,16 @@ class MainActivity : AppCompatActivity() {
     private fun countryAdapterInit() {
         /* Preenchido por Web Service */
         countryAdapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1)
+        countryNameSlugMap = mutableMapOf()
         countrySp.adapter = countryAdapter
         viewModel.fetchCountries().observe(
             this,
             Observer { countryList ->
-                countryList.forEach { countryListItem ->
-                    if ( countryListItem.country.isNotEmpty()) { countryAdapter.add(countryListItem.country) }
+                countryList.sortedBy { it.country }.forEach { countryListItem ->
+                    if ( countryListItem.country.isNotEmpty()) {
+                        countryAdapter.add(countryListItem.country)
+                        countryNameSlugMap[countryListItem.country] = countryListItem.slug
+                    }
                 }
             }
         )
@@ -74,15 +79,16 @@ class MainActivity : AppCompatActivity() {
         infoSp.onItemSelectedListener = object: AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: AdapterView<*>?) { }
 
+            // A nova versão dos serviços alterou a forma como dispomos os dados
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 when (position) {
                     Information.DAY_ONE.ordinal -> {
-                        viewModeTv.visibility = View.GONE
-                        viewModeRg.visibility = View.GONE
-                    }
-                    Information.BY_COUNTRY.ordinal -> {
                         viewModeTv.visibility = View.VISIBLE
                         viewModeRg.visibility = View.VISIBLE
+                    }
+                    Information.BY_COUNTRY.ordinal -> {
+                        viewModeTv.visibility = View.GONE
+                        viewModeRg.visibility = View.GONE
                     }
                 }
             }
@@ -97,17 +103,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun fetchDayOne() {
-        modoGrafico(ligado = false)
-        viewModel.fetchDayOne(countrySp.selectedItem.toString(), statusSp.selectedItem.toString()).observe(
-            this,
-            Observer { casesList ->
-                resultTv.text = casesListToString(casesList)
-            }
-        )
-    }
+        val countrySlug = countryNameSlugMap[countrySp.selectedItem.toString()]!!
 
-    private fun fetchByCountry() {
-        viewModel.fetchByCountry(countrySp.selectedItem.toString(), statusSp.selectedItem.toString()).observe(
+        viewModel.fetchDayOne(countrySlug, statusSp.selectedItem.toString()).observe(
             this,
             Observer { casesList ->
                 if (viewModeTextRb.isChecked) {
@@ -151,6 +149,18 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun fetchByCountry() {
+        val countrySlug = countryNameSlugMap[countrySp.selectedItem.toString()]!!
+
+        modoGrafico(ligado = false)
+        viewModel.fetchByCountry(countrySlug, statusSp.selectedItem.toString()).observe(
+            this,
+            Observer { casesList ->
+                resultTv.text = casesListToString(casesList)
+            }
+        )
+    }
+
     private fun modoGrafico(ligado: Boolean) {
         if (ligado) {
             resultTv.visibility = View.GONE
@@ -162,16 +172,34 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun casesListToString(caseList: CaseList): String {
+    private inline fun <reified  T: ArrayList<*>> casesListToString(responseList: T): String {
         val resultSb = StringBuffer()
-        caseList.forEach {
-            resultSb.append("Nome: ${it.country}\n")
-            if (it.province.isNotEmpty()) {
-                resultSb.append("Estado/região: ${it.province}\n")
+
+        // Usando class.java para não ter que adicionar biblioteca de reflexão Kotlin
+        responseList.forEach {
+            when(T::class.java) {
+                DayOneResponseList::class.java -> {
+                    with (it as DayOneResponseListItem) {
+                        resultSb.append("Casos: ${this.cases}\n")
+                        resultSb.append("Data: ${this.date.substring(0,10)}\n\n")
+                    }
+                }
+                ByCountryResponseList::class.java -> {
+                    with (it as ByCountryResponseListItem) {
+                        this.province.takeIf { !this.province.isNullOrEmpty() }?.let { province ->
+                            resultSb.append("Estado/Província: ${province}\n")
+                        }
+                        this.city.takeIf { !this.city.isNullOrEmpty() }?.let { city ->
+                            resultSb.append("Cidade: ${city}\n")
+                        }
+
+                        resultSb.append("Casos: ${this.cases}\n")
+                        resultSb.append("Data: ${this.date.substring(0,10)}\n\n")
+                    }
+                }
             }
-            resultSb.append("Data: ${it.date.substring(0,10)}\n")
-            resultSb.append("Casos: ${it.cases}\n\n")
         }
+
         return resultSb.toString()
     }
 }
