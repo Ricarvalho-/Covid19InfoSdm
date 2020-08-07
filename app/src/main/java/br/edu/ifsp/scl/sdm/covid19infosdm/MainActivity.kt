@@ -176,35 +176,39 @@ class MainActivity : AppCompatActivity() {
         resultGv.visibility = View.VISIBLE
     }
 
-    private fun casesListToString(responseList: DayOneResponseList) = StringBuilder().apply {
-        responseList.forEach {
-            append(
-                """
+    private fun casesListToString(responseList: DayOneResponseList) =
+        if (responseList.isEmpty()) getString(R.string.no_data)
+        else StringBuilder().apply {
+            responseList.forEach {
+                append(
+                    """
                     Casos: ${it.cases}
                     Data: ${it.date.substring(0, 10)}
                     
                     
                 """.trimIndent()
-            )
-        }
-    }.toString()
+                )
+            }
+        }.toString()
 
-    private fun casesListToString(responseList: ByCountryResponseList) = StringBuilder().apply {
-        responseList.forEach { responseItem ->
-            responseItem.province.takeUnless { it.isNullOrEmpty() }?.let {
-                appendln("Estado/Província: $it")
-            }
-            responseItem.city.takeUnless { it.isNullOrEmpty() }?.let {
-                appendln("Cidade: $it")
-            }
-            append(
-                """
+    private fun casesListToString(responseList: ByCountryResponseList) =
+        if (responseList.isEmpty()) getString(R.string.no_data)
+        else StringBuilder().apply {
+            responseList.forEach { responseItem ->
+                responseItem.province.takeUnless { it.isNullOrEmpty() }?.let {
+                    appendln("Estado/Província: $it")
+                }
+                responseItem.city.takeUnless { it.isNullOrEmpty() }?.let {
+                    appendln("Cidade: $it")
+                }
+                append(
+                    """
                     Casos: ${responseItem.cases}
                     Data: ${responseItem.date.substring(0, 10)}
                     
                     
                 """.trimIndent()
-            )
-        }
-    }.toString()
+                )
+            }
+        }.toString()
 }
