@@ -1,12 +1,14 @@
 package br.edu.ifsp.scl.sdm.covid19infosdm
 
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Observer
-import br.edu.ifsp.scl.sdm.covid19infosdm.model.dataclass.*
+import br.edu.ifsp.scl.sdm.covid19infosdm.model.dataclass.ByCountryResponseList
+import br.edu.ifsp.scl.sdm.covid19infosdm.model.dataclass.DayOneResponseList
 import br.edu.ifsp.scl.sdm.covid19infosdm.viewmodel.Covid19ViewModel
 import com.jjoe64.graphview.helper.DateAsXAxisLabelFormatter
 import com.jjoe64.graphview.series.DataPoint
@@ -16,9 +18,10 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var viewModel: Covid19ViewModel
-    private lateinit var countryAdapter: ArrayAdapter<String>
-    private lateinit var countryNameSlugMap: MutableMap<String, String>
+    private var countryNameSlugMap = emptyMap<String, String>()
+    private val viewModel: Covid19ViewModel by viewModels()
+    private val selectedCountry get() = countrySp.selectedItem?.toString().orEmpty()
+    private val selectedStatus get() = statusSp.selectedItem?.toString().orEmpty()
 
     /* Classe para os serviços que serão acessados */
     private enum class Information(val type: String){
@@ -37,43 +40,41 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        viewModel = Covid19ViewModel(this)
-
         countryAdapterInit()
-
         informationAdapterInit()
-
         statusAdapterInit()
     }
 
     fun onRetrieveClick(view: View) {
+        if (countryNameSlugMap.isEmpty()) return
+        loading.visibility = View.VISIBLE
+
         when (infoSp.selectedItem.toString()) {
-            Information.DAY_ONE.type -> { fetchDayOne() }
-            Information.BY_COUNTRY.type -> { fetchByCountry() }
+            Information.DAY_ONE.type -> fetchDayOne()
+            Information.BY_COUNTRY.type -> fetchByCountry()
         }
     }
 
     private fun countryAdapterInit() {
         /* Preenchido por Web Service */
-        countryAdapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1)
-        countryNameSlugMap = mutableMapOf()
+        val countryAdapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1)
         countrySp.adapter = countryAdapter
+        loading.visibility = View.VISIBLE
         viewModel.fetchCountries().observe(
             this,
             Observer { countryList ->
-                countryList.sortedBy { it.country }.forEach { countryListItem ->
-                    if ( countryListItem.country.isNotEmpty()) {
-                        countryAdapter.add(countryListItem.country)
-                        countryNameSlugMap[countryListItem.country] = countryListItem.slug
-                    }
-                }
+                loading.visibility = View.GONE
+                countryNameSlugMap = countryList
+                    .filterNot { it.country.isEmpty() }
+                    .sortedBy { it.country }
+                    .onEach { countryAdapter.add(it.country) }
+                    .associate { it.country to it.slug }
             }
         )
     }
 
     private fun informationAdapterInit() {
-        val informationList = arrayListOf<String>()
-        Information.values().forEach { informationList.add(it.type) }
+        val informationList = Information.values().map { it.type }
 
         infoSp.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, informationList)
         infoSp.onItemSelectedListener = object: AdapterView.OnItemSelectedListener {
@@ -82,124 +83,128 @@ class MainActivity : AppCompatActivity() {
             // A nova versão dos serviços alterou a forma como dispomos os dados
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 when (position) {
-                    Information.DAY_ONE.ordinal -> {
-                        viewModeTv.visibility = View.VISIBLE
-                        viewModeRg.visibility = View.VISIBLE
-                    }
-                    Information.BY_COUNTRY.ordinal -> {
-                        viewModeTv.visibility = View.GONE
-                        viewModeRg.visibility = View.GONE
-                    }
+                    Information.DAY_ONE.ordinal -> View.VISIBLE
+                    Information.BY_COUNTRY.ordinal -> View.GONE
+                    else -> null
+                }?.let {
+                    viewModeTv.visibility = it
+                    viewModeRg.visibility = it
                 }
             }
         }
     }
 
     private fun statusAdapterInit() {
-        val statusList = arrayListOf<String>()
-        Status.values().forEach { statusList.add(it.type) }
-
+        val statusList = Status.values().map { it.type }
         statusSp.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, statusList)
     }
 
     private fun fetchDayOne() {
-        val countrySlug = countryNameSlugMap[countrySp.selectedItem.toString()]!!
+        val countrySlug = countryNameSlugMap[selectedCountry] ?: return
 
-        viewModel.fetchDayOne(countrySlug, statusSp.selectedItem.toString()).observe(
+        viewModel.fetchDayOne(countrySlug, selectedStatus).observe(
             this,
             Observer { casesList ->
-                if (viewModeTextRb.isChecked) {
-                    /* Modo texto */
-                    modoGrafico(ligado = false)
-                    resultTv.text = casesListToString(casesList)
-                }
-                else {
-                    /* Modo gráfico */
-                    modoGrafico(ligado = true)
-                    resultGv.removeAllSeries()
-                    resultGv.gridLabelRenderer.resetStyles()
-
-                    /* Preparando pontos */
-                    val pointsArrayList = arrayListOf<DataPoint>()
-                    casesList.forEach {
-                        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(it.date.substring(0,10))
-                        val point = DataPoint(date, it.cases.toDouble())
-                        pointsArrayList.add(point)
-                    }
-                    val pointsSeries = LineGraphSeries(pointsArrayList.toTypedArray())
-                    resultGv.addSeries(pointsSeries)
-
-                    /* Formatando gráfico */
-                    resultGv.gridLabelRenderer.setHumanRounding(false)
-                    resultGv.gridLabelRenderer.labelFormatter = DateAsXAxisLabelFormatter(this)
-
-                    resultGv.gridLabelRenderer.numHorizontalLabels = 4
-                    val primeiraData = Date(pointsArrayList.first().x.toLong())
-                    val ultimaData = Date(pointsArrayList.last().x.toLong())
-                    resultGv.viewport.setMinX(primeiraData.time.toDouble())
-                    resultGv.viewport.setMaxX(ultimaData.time.toDouble())
-                    resultGv.viewport.isXAxisBoundsManual = true
-
-                    resultGv.gridLabelRenderer.numVerticalLabels = 4
-                    resultGv.viewport.setMinY(pointsArrayList.first().y)
-                    resultGv.viewport.setMaxY(pointsArrayList.last().y)
-                    resultGv.viewport.isYAxisBoundsManual = true
-                }
+                loading.visibility = View.GONE
+                if (viewModeTextRb.isChecked) updateTextData(casesList)
+                else updateChartData(casesList)
             }
         )
+    }
+
+    private fun updateTextData(casesList: DayOneResponseList) {
+        textMode()
+        resultTv.text = casesListToString(casesList)
+    }
+
+    private fun updateChartData(casesList: DayOneResponseList) {
+        if (casesList.isEmpty()) {
+            textMode()
+            resultTv.text = getString(R.string.no_data)
+            return
+        }
+
+        chartMode()
+        resultGv.removeAllSeries()
+        resultGv.gridLabelRenderer.resetStyles()
+
+        /* Preparando pontos */
+        val points = casesList.map {
+            val clippedDate = it.date.substring(0, 10)
+            val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(clippedDate)
+            DataPoint(date, it.cases.toDouble())
+        }
+
+        /* Formatando gráfico */
+        resultGv.gridLabelRenderer.setHumanRounding(false)
+        resultGv.gridLabelRenderer.labelFormatter = DateAsXAxisLabelFormatter(this)
+
+        resultGv.gridLabelRenderer.numHorizontalLabels = 4
+        resultGv.viewport.setMinX(points.first().x)
+        resultGv.viewport.setMaxX(points.last().x)
+        resultGv.viewport.isXAxisBoundsManual = true
+
+        resultGv.gridLabelRenderer.numVerticalLabels = 4
+        resultGv.viewport.setMinY(points.first().y)
+        resultGv.viewport.setMaxY(points.last().y)
+        resultGv.viewport.isYAxisBoundsManual = true
+
+        val pointsSeries = LineGraphSeries(points.toTypedArray())
+        resultGv.addSeries(pointsSeries)
     }
 
     private fun fetchByCountry() {
-        val countrySlug = countryNameSlugMap[countrySp.selectedItem.toString()]!!
+        val countrySlug = countryNameSlugMap[selectedCountry] ?: return
 
-        modoGrafico(ligado = false)
-        viewModel.fetchByCountry(countrySlug, statusSp.selectedItem.toString()).observe(
+        textMode()
+        viewModel.fetchByCountry(countrySlug, selectedStatus).observe(
             this,
-            Observer { casesList ->
-                resultTv.text = casesListToString(casesList)
+            Observer {
+                loading.visibility = View.GONE
+                resultTv.text = casesListToString(it)
             }
         )
     }
 
-    private fun modoGrafico(ligado: Boolean) {
-        if (ligado) {
-            resultTv.visibility = View.GONE
-            resultGv.visibility = View.VISIBLE
-        }
-        else {
-            resultTv.visibility = View.VISIBLE
-            resultGv.visibility = View.GONE
-        }
+    private fun textMode() {
+        resultTv.visibility = View.VISIBLE
+        resultGv.visibility = View.GONE
     }
 
-    private inline fun <reified  T: ArrayList<*>> casesListToString(responseList: T): String {
-        val resultSb = StringBuffer()
+    private fun chartMode() {
+        resultTv.visibility = View.GONE
+        resultGv.visibility = View.VISIBLE
+    }
 
-        // Usando class.java para não ter que adicionar biblioteca de reflexão Kotlin
+    private fun casesListToString(responseList: DayOneResponseList) = StringBuilder().apply {
         responseList.forEach {
-            when(T::class.java) {
-                DayOneResponseList::class.java -> {
-                    with (it as DayOneResponseListItem) {
-                        resultSb.append("Casos: ${this.cases}\n")
-                        resultSb.append("Data: ${this.date.substring(0,10)}\n\n")
-                    }
-                }
-                ByCountryResponseList::class.java -> {
-                    with (it as ByCountryResponseListItem) {
-                        this.province.takeIf { !this.province.isNullOrEmpty() }?.let { province ->
-                            resultSb.append("Estado/Província: ${province}\n")
-                        }
-                        this.city.takeIf { !this.city.isNullOrEmpty() }?.let { city ->
-                            resultSb.append("Cidade: ${city}\n")
-                        }
-
-                        resultSb.append("Casos: ${this.cases}\n")
-                        resultSb.append("Data: ${this.date.substring(0,10)}\n\n")
-                    }
-                }
-            }
+            append(
+                """
+                    Casos: ${it.cases}
+                    Data: ${it.date.substring(0, 10)}
+                    
+                    
+                """.trimIndent()
+            )
         }
+    }.toString()
 
-        return resultSb.toString()
-    }
+    private fun casesListToString(responseList: ByCountryResponseList) = StringBuilder().apply {
+        responseList.forEach { responseItem ->
+            responseItem.province.takeUnless { it.isNullOrEmpty() }?.let {
+                appendln("Estado/Província: $it")
+            }
+            responseItem.city.takeUnless { it.isNullOrEmpty() }?.let {
+                appendln("Cidade: $it")
+            }
+            append(
+                """
+                    Casos: ${responseItem.cases}
+                    Data: ${responseItem.date.substring(0, 10)}
+                    
+                    
+                """.trimIndent()
+            )
+        }
+    }.toString()
 }
